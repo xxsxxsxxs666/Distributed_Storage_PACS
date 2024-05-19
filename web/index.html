@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>DICOM Viewer</title>
+</head>
+<body>
+    <button id="wwwc">我要wwwc</button>
+    <button id="angle">角度工具</button>
+    <button id="copyData">上载新患者数据</button>
+    <select id="patientSelector">
+        <option value="" disabled selected>选择患者</option>
+    </select>
+    <input type="file" id="fileInput" webkitdirectory directory multiple style="display:none;" />
+    <div id="dicomImage" style="width: 512px; height: 512px;"></div>
+
+    <script src="https://unpkg.com/hammerjs@2.0.8/hammer.js"></script>
+    <script src="https://unpkg.com/cornerstone-core@2.3.0/dist/cornerstone.js"></script>
+    <script src="https://unpkg.com/cornerstone-math@0.1.8/dist/cornerstoneMath.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-wado-image-loader@3.1.2/dist/cornerstoneWADOImageLoader.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-web-image-loader@2.1.1/dist/cornerstoneWebImageLoader.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-tools@4.20.1/dist/cornerstoneTools.js"></script>
+    <script src="https://unpkg.com/dicom-parser@1.8.5/dist/dicomParser.min.js"></script>
+    <script>
+        cornerstoneTools.external.cornerstone = cornerstone;
+        cornerstoneTools.external.cornerstoneMath = cornerstoneMath;
+        cornerstoneTools.external.Hammer = Hammer;
+        cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
+        cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
+
+        cornerstoneTools.init();
+
+        var element = document.getElementById('dicomImage');
+        cornerstone.enable(element);
+
+        const StackScrollMouseWheelTool = cornerstoneTools.StackScrollMouseWheelTool;
+        const AngleTool = cornerstoneTools.AngleTool;
+        const WwwcTool = cornerstoneTools.WwwcTool;
+
+        cornerstoneTools.addTool(StackScrollMouseWheelTool);
+        cornerstoneTools.addTool(AngleTool);
+        cornerstoneTools.addTool(WwwcTool);
+
+        let activeTool = null;
+
+        function disableAllToolsExceptScroll() {
+            cornerstoneTools.setToolDisabled('Wwwc');
+            cornerstoneTools.setToolDisabled('Angle');
+        }
+
+        function setActiveTool(toolName) {
+            disableAllToolsExceptScroll();
+            if (toolName) {
+                cornerstoneTools.setToolActive(toolName, { mouseButtonMask: 1 });
+            }
+            activeTool = toolName;
+        }
+
+        function loadPatientData(patientId) {
+            fetch(`http://127.0.0.1:8000/patientdcm/${patientId}/`)
+                .then(response => response.json())
+                .then(data => {
+                    console.log("Received data:", data);
+
+                    const imageIds = data.map((_, index) => `wadouri:http://127.0.0.1:8000/read/${patientId}/${index}`);
+                    const stack = {
+                        currentImageIdIndex: 0,
+                        imageIds
+                    };
+
+                    return cornerstone.loadAndCacheImage(imageIds[0]).then(function(image) {
+                        cornerstone.displayImage(element, image);
+                        cornerstoneTools.addStackStateManager(element, ['stack']);
+                        cornerstoneTools.addToolState(element, 'stack', stack);
+
+                        cornerstoneTools.setToolActive('StackScrollMouseWheel', {});
+
+                        setActiveTool(activeTool);
+                    }).catch(error => console.error('Error loading image:', error));
+                })
+                .catch(error => console.error('Error loading patient data:', error));
+        }
+
+        function loadPatientSelector() {
+            fetch('http://127.0.0.1:8000/get_all_patients/')
+                .then(response => response.json())
+                .then(data => {
+                    const patientSelector = document.getElementById('patientSelector');
+                    patientSelector.innerHTML = '<option value="" disabled selected>选择患者</option>';
+                    data.forEach(patient => {
+                        const option = document.createElement('option');
+                        option.value = patient;
+                        option.textContent = patient;
+                        patientSelector.appendChild(option);
+                    });
+                })
+                .catch(error => console.error('Error loading patient selector:', error));
+        }
+
+        document.getElementById('patientSelector').addEventListener('change', function(event) {
+            const selectedPatient = event.target.value;
+            loadPatientData(selectedPatient);
+        });
+
+        document.getElementById('wwwc').addEventListener('click', function() {
+            if (activeTool === 'Wwwc') {
+                setActiveTool(null);
+            } else {
+                setActiveTool('Wwwc');
+            }
+        });
+
+        document.getElementById('angle').addEventListener('click', function() {
+            if (activeTool === 'Angle') {
+                setActiveTool(null);
+            } else {
+                setActiveTool('Angle');
+            }
+        });
+
+        document.getElementById('copyData').addEventListener('click', function() {
+            document.getElementById('fileInput').click();
+        });
+
+        document.getElementById('fileInput').addEventListener('change', function(event) {
+            const files = event.target.files;
+            if (files.length === 0) {
+                alert('请选择一个文件夹');
+                return;
+            }
+
+            // 获取文件夹名称作为 patient_id
+            const patientId = files[0].webkitRelativePath.split('/')[0];
+
+            const formData = new FormData();
+            formData.append('patient_id', patientId);
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files', files[i]);
+            }
+
+            fetch('http://127.0.0.1:8000/copy_newpatient_to_patient/', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('数据上载成功');
+                    // 更新 patientSelector
+                    loadPatientSelector();
+                    // 载入新患者数据
+                    loadPatientData(patientId);
+                } else {
+                    alert('数据上载失败');
+                }
+            })
+            .catch(error => console.error('Error copying data:', error));
+        });
+
+        loadPatientSelector();
+        cornerstoneTools.setToolActive('StackScrollMouseWheel', {});
+    </script>
+</body>
+</html>

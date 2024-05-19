@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed PACS System</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #E0E0E0;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+        }
+
+        h1 {
+            margin: 20px 0;
+            font-size: 2.5em;
+            color: #FCFDF6; /* 科技蓝色 */
+        }
+
+        #dicomContainer {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 20px auto;
+            padding: 20px;
+            border: 2px solid #FCFDF6;
+            border-radius: 10px;
+            width: 512px; /* 确保容器宽度固定 */
+            height: 512px; /* 确保容器高度固定 */
+            box-sizing: border-box; /* 包括边框和内边距在内 */
+        }
+
+        #dicomImage {
+            width: 100%; /* 适应容器宽度 */
+            height: 100%; /* 适应容器高度 */
+        }
+
+        .control-container {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        .control-button, select {
+            background-color: rgba(0, 188, 212, 0.1); /* 透明背景 */
+            border: 2px solid #FCFDF6; /* 科技蓝色 */
+            border-radius: 10px;
+            color: #E0E0E0;
+            font-size: 1.2em;
+            margin: 0 10px;
+            padding: 10px 20px;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.3s;
+        }
+
+        .control-button:hover, select:hover {
+            background-color: rgba(0, 188, 212, 0.3); /* 鼠标悬停时更透明的背景 */
+            color: #E0E0E0;
+            transform: scale(1.05);
+        }
+
+        #fileInput {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Distributed PACS System</h1>
+    <div id="dicomContainer">
+        <div id="dicomImage"></div>
+    </div>
+    <div class="control-container">
+        <button id="wwwc" class="control-button">窗宽窗位</button>
+        <button id="angle" class="control-button">角度工具</button>
+        <button id="copyData" class="control-button">上载新患者数据</button>
+        <select id="patientSelector">
+            <option value="" disabled selected>选择患者</option>
+        </select>
+    </div>
+
+    <input type="file" id="fileInput" webkitdirectory directory multiple />
+
+    <script src="https://unpkg.com/hammerjs@2.0.8/hammer.js"></script>
+    <script src="https://unpkg.com/cornerstone-core@2.3.0/dist/cornerstone.js"></script>
+    <script src="https://unpkg.com/cornerstone-math@0.1.8/dist/cornerstoneMath.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-wado-image-loader@3.1.2/dist/cornerstoneWADOImageLoader.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-web-image-loader@2.1.1/dist/cornerstoneWebImageLoader.min.js"></script>
+    <script src="https://unpkg.com/cornerstone-tools@4.20.1/dist/cornerstoneTools.js"></script>
+    <script src="https://unpkg.com/dicom-parser@1.8.5/dist/dicomParser.min.js"></script>
+    <script>
+        cornerstoneTools.external.cornerstone = cornerstone;
+        cornerstoneTools.external.cornerstoneMath = cornerstoneMath;
+        cornerstoneTools.external.Hammer = Hammer;
+        cornerstoneWADOImageLoader.external.dicomParser = dicomParser;
+        cornerstoneWADOImageLoader.external.cornerstone = cornerstone;
+
+        cornerstoneTools.init();
+
+        var element = document.getElementById('dicomImage');
+        cornerstone.enable(element);
+
+        const StackScrollMouseWheelTool = cornerstoneTools.StackScrollMouseWheelTool;
+        const AngleTool = cornerstoneTools.AngleTool;
+        const WwwcTool = cornerstoneTools.WwwcTool;
+
+        cornerstoneTools.addTool(StackScrollMouseWheelTool);
+        cornerstoneTools.addTool(AngleTool);
+        cornerstoneTools.addTool(WwwcTool);
+
+        let activeTool = null;
+
+        function disableAllToolsExceptScroll() {
+            cornerstoneTools.setToolDisabled('Wwwc');
+            cornerstoneTools.setToolDisabled('Angle');
+        }
+
+        function setActiveTool(toolName) {
+            disableAllToolsExceptScroll();
+            if (toolName) {
+                cornerstoneTools.setToolActive(toolName, { mouseButtonMask: 1 });
+            }
+            activeTool = toolName;
+        }
+
+        function loadPatientData(patientId) {
+            fetch(`http://127.0.0.1:8000/patientdcm/${patientId}/`)
+                .then(response => response.json())
+                .then(data => {
+                    console.log("Received data:", data);
+
+                    const imageIds = data.map((_, index) => `wadouri:http://127.0.0.1:8000/read/${patientId}/${index}`);
+                    const stack = {
+                        currentImageIdIndex: 0,
+                        imageIds
+                    };
+
+                    return cornerstone.loadAndCacheImage(imageIds[0]).then(function(image) {
+                        cornerstone.displayImage(element, image);
+                        cornerstoneTools.addStackStateManager(element, ['stack']);
+                        cornerstoneTools.addToolState(element, 'stack', stack);
+
+                        cornerstoneTools.setToolActive('StackScrollMouseWheel', {});
+
+                        setActiveTool(activeTool);
+                    }).catch(error => console.error('Error loading image:', error));
+                })
+                .catch(error => console.error('Error loading patient data:', error));
+        }
+
+        function loadPatientSelector() {
+            const patientSelector = document.getElementById('patientSelector');
+            patientSelector.innerHTML = '<option value="" disabled selected>加载中...</option>';
+
+            fetch('http://127.0.0.1:8000/get_all_patients/')
+                .then(response => response.json())
+                .then(data => {
+                    patientSelector.innerHTML = '<option value="" disabled selected>选择患者</option>';
+                    data.forEach(patient => {
+                        const option = document.createElement('option');
+                        option.value = patient;
+                        option.textContent = patient;
+                        patientSelector.appendChild(option);
+                    });
+                })
+                .catch(error => {
+                    console.error('Error loading patient selector:', error);
+                    patientSelector.innerHTML = '<option value="" disabled selected>加载失败</option>';
+                });
+        }
+
+        document.getElementById('patientSelector').addEventListener('change', function(event) {
+            const selectedPatient = event.target.value;
+            loadPatientData(selectedPatient);
+        });
+
+        document.getElementById('wwwc').addEventListener('click', function() {
+            if (activeTool === 'Wwwc') {
+                setActiveTool(null);
+            } else {
+                setActiveTool('Wwwc');
+            }
+        });
+
+        document.getElementById('angle').addEventListener('click', function() {
+            if (activeTool === 'Angle') {
+                setActiveTool(null);
+            } else {
+                setActiveTool('Angle');
+            }
+        });
+
+        document.getElementById('copyData').addEventListener('click', function() {
+            document.getElementById('fileInput').click();
+        });
+
+        document.getElementById('fileInput').addEventListener('change', function(event) {
+            const files = event.target.files;
+            if (files.length === 0) {
+                alert('请选择一个文件夹');
+                return;
+            }
+
+            // 获取文件夹名称作为 patient_id
+            const patientId = files[0].webkitRelativePath.split('/')[0];
+
+            const formData = new FormData();
+            formData.append('patient_id', patientId);
+            for (let i = 0; i < files.length; i++) {
+                formData.append('files', files[i]);
+            }
+
+            fetch('http://127.0.0.1:8000/copy_newpatient_to_patient/', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    alert('数据上载成功');
+                    // 更新 patientSelector
+                    loadPatientSelector();
+                    // 载入新患者数据
+                    loadPatientData(patientId);
+                } else {
+                    alert('数据上载失败');
+                }
+            })
+            .catch(error => console.error('Error copying data:', error));
+        });
+
+        loadPatientSelector();
+        cornerstoneTools.setToolActive('StackScrollMouseWheel', {});
+    </script>
+</body>
+</html>
