@@ -49,3 +49,6 @@
 2. **访问网页**
 
    在浏览器中打开 `web/index_optimize.html` 即可访问系统的 Web 界面。
+
+
+[!image](demo.png)
