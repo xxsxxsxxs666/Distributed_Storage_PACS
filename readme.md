@@ -48,7 +48,7 @@
     ```
 2. **访问网页**
 
-   在浏览器中打开 `web/index_optimize.html` 即可访问系统的 Web 界面。
+   在浏览器中打开 `web/index_optimize.html` 即可访问系统的 Web 界面。滚轮控制切片，鼠标左键控制窗宽窗位和角度工具。
 
 
 ### 示例展示
