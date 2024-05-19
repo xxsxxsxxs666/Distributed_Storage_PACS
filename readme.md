@@ -51,4 +51,12 @@
    在浏览器中打开 `web/index_optimize.html` 即可访问系统的 Web 界面。
 
 
-[!image](demo.png)
+### 示例展示
+
+![Demo](./demo.png)
+
+### 致谢
+
+感谢以下资源和项目的帮助：
+
+- [PACS Tutorial by Shenxianglong](https://github.com/shenxianglong/pacs-tutorial)
